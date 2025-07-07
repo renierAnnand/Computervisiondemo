@@ -1,0 +1,4 @@
+sentiment-detector/
+├── sentiment_app.py
+├── requirements.txt
+└── README.md
