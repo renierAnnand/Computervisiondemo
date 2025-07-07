@@ -37,6 +37,14 @@ st.markdown("""
         border: 3px solid #dc3545;
         color: #721c24;
     }
+    .camera-error {
+        background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+        border: 3px solid #856404;
+        color: #856404;
+        padding: 2rem;
+        border-radius: 15px;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -45,6 +53,8 @@ if 'detections' not in st.session_state:
     st.session_state.detections = 0
 if 'emotions_detected' not in st.session_state:
     st.session_state.emotions_detected = []
+if 'camera_tested' not in st.session_state:
+    st.session_state.camera_tested = False
 
 # Load face detector
 @st.cache_resource
@@ -52,6 +62,19 @@ def load_face_detector():
     return cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 face_cascade = load_face_detector()
+
+# Test camera function
+def test_camera_access():
+    """Test if camera is accessible"""
+    try:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            cap.release()
+            return ret and frame is not None
+        return False
+    except Exception as e:
+        return False
 
 # Simple emotion simulation
 def get_random_emotion():
@@ -121,16 +144,35 @@ def draw_face_boxes(frame, detections):
 st.markdown('<h1 class="main-header">🎭 Real-Time Face & Emotion Detection</h1>', 
            unsafe_allow_html=True)
 
+# Camera troubleshooting section
 st.markdown("""
-<div style='text-align: center; color: #666; margin-bottom: 2rem;'>
-    <p><strong>✅ No complex dependencies • Works everywhere • Fast deployment</strong></p>
-    <p>Face detection with simulated emotion analysis using OpenCV</p>
+<div class="camera-error">
+    <h3>📹 Camera Access Required</h3>
+    <p><strong>If you see "Camera not accessible" error:</strong></p>
+    <ol>
+        <li>Look for a <strong>camera icon 🎥</strong> in your browser's address bar</li>
+        <li>Click it and select <strong>"Allow"</strong></li>
+        <li><strong>Refresh this page</strong> (F5 or Ctrl+R)</li>
+        <li>Click <strong>"Start Camera"</strong> again</li>
+    </ol>
+    <p><strong>Alternative:</strong> Try opening this app in <strong>Chrome browser</strong> if Edge doesn't work</p>
 </div>
 """, unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
     st.header("🎛️ Camera Controls")
+    
+    # Test camera button
+    if st.button("🔍 Test Camera Access"):
+        with st.spinner("Testing camera..."):
+            camera_works = test_camera_access()
+            st.session_state.camera_tested = True
+            if camera_works:
+                st.success("✅ Camera is accessible!")
+            else:
+                st.error("❌ Camera not accessible - check permissions")
+    
     camera_on = st.checkbox("🎥 Start Camera", key="camera_control")
     
     st.divider()
@@ -165,93 +207,114 @@ with col2:
     st.subheader("📊 Live Status")
     status_container = st.empty()
 
-# Camera processing
+# Camera processing with enhanced error handling
 if camera_on:
-    camera = cv2.VideoCapture(0)
-    
-    # Set camera properties
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    
-    frame_count = 0
-    
-    while camera_on:
-        ret, frame = camera.read()
+    try:
+        camera = cv2.VideoCapture(0)
         
-        if not ret:
-            st.error("❌ Camera not accessible! Please check browser permissions.")
-            break
+        # Enhanced camera initialization
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        frame_count += 1
-        
-        # Process every few frames for performance
-        if frame_count % detection_sensitivity == 0:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Check if camera opened successfully
+        if not camera.isOpened():
+            st.error("❌ Camera could not be opened. Check if:")
+            st.error("• Camera permissions are granted in browser")
+            st.error("• No other app is using the camera")
+            st.error("• Camera drivers are installed properly")
+        else:
+            frame_count = 0
+            successful_reads = 0
             
-            # Detect faces and emotions
-            detections = detect_faces_and_emotions(frame_rgb)
-            
-            # Draw annotations
-            annotated_frame = draw_face_boxes(frame_rgb.copy(), detections)
-            
-            # Add frame info
-            cv2.putText(annotated_frame, f"Frame: {frame_count} | Faces: {len(detections)}", 
-                       (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Display frame
-            frame_container.image(annotated_frame, channels="RGB", use_column_width=True)
-            
-            # Update status
-            if detections:
-                # Show first detected face info
-                detection = detections[0]
-                emoji = detection['emoji']
-                emotion = detection['emotion']
-                confidence = detection['confidence']
+            while camera_on:
+                ret, frame = camera.read()
                 
-                status_html = f"""
-                <div class="status-card face-detected">
-                    <h1>{emoji}</h1>
-                    <h2>{emotion}</h2>
-                    <h4>Confidence: {confidence}</h4>
-                    <p>✅ {len(detections)} face(s) detected</p>
-                </div>
-                """
+                if not ret:
+                    if frame_count == 0:
+                        st.error("❌ Camera not accessible! Please check browser permissions.")
+                        st.info("💡 **Edge Browser Fix:**")
+                        st.info("1. Look for camera icon 🎥 in address bar")
+                        st.info("2. Click it and select 'Allow'")
+                        st.info("3. Refresh this page (F5)")
+                        st.info("4. Or try in Chrome browser")
+                    break
                 
-                # Update counters
-                st.session_state.detections += 1
-                st.session_state.emotions_detected.append(emotion)
+                successful_reads += 1
+                frame_count += 1
                 
-                # Keep only last 20 emotions
-                if len(st.session_state.emotions_detected) > 20:
-                    st.session_state.emotions_detected = st.session_state.emotions_detected[-20:]
+                # Process every few frames for performance
+                if frame_count % detection_sensitivity == 0:
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    # Detect faces and emotions
+                    detections = detect_faces_and_emotions(frame_rgb)
+                    
+                    # Draw annotations
+                    annotated_frame = draw_face_boxes(frame_rgb.copy(), detections)
+                    
+                    # Add frame info
+                    cv2.putText(annotated_frame, f"✅ Camera Active | Frame: {frame_count} | Faces: {len(detections)}", 
+                               (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    
+                    # Display frame
+                    frame_container.image(annotated_frame, channels="RGB", use_column_width=True)
+                    
+                    # Update status
+                    if detections:
+                        # Show first detected face info
+                        detection = detections[0]
+                        emoji = detection['emoji']
+                        emotion = detection['emotion']
+                        confidence = detection['confidence']
+                        
+                        status_html = f"""
+                        <div class="status-card face-detected">
+                            <h1>{emoji}</h1>
+                            <h2>{emotion}</h2>
+                            <h4>Confidence: {confidence}</h4>
+                            <p>✅ {len(detections)} face(s) detected</p>
+                        </div>
+                        """
+                        
+                        # Update counters
+                        st.session_state.detections += 1
+                        st.session_state.emotions_detected.append(emotion)
+                        
+                        # Keep only last 20 emotions
+                        if len(st.session_state.emotions_detected) > 20:
+                            st.session_state.emotions_detected = st.session_state.emotions_detected[-20:]
+                        
+                    else:
+                        status_html = """
+                        <div class="status-card no-face">
+                            <h2>👀 Looking for faces...</h2>
+                            <p>Position your face in the camera</p>
+                            <p><small>Make sure you have good lighting</small></p>
+                        </div>
+                        """
+                    
+                    status_container.markdown(status_html, unsafe_allow_html=True)
                 
-            else:
-                status_html = """
-                <div class="status-card no-face">
-                    <h2>❌ No Face Detected</h2>
-                    <p>Position your face in the camera</p>
-                    <p><small>Make sure you have good lighting</small></p>
-                </div>
-                """
-            
-            status_container.markdown(status_html, unsafe_allow_html=True)
+                # Small delay
+                time.sleep(0.05)
+                
+                # Check if user stopped camera
+                if not camera_on:
+                    break
         
-        # Small delay
-        time.sleep(0.05)
+        camera.release()
         
-        # Check if user stopped camera
-        if not camera_on:
-            break
-    
-    camera.release()
-    
+    except Exception as e:
+        st.error(f"❌ Camera error: {str(e)}")
+        st.info("💡 Try refreshing the page or using a different browser")
+        
 else:
     frame_container.info("📷 Click 'Start Camera' in the sidebar to begin detection")
     status_container.empty()
 
 # Control buttons
-st.subheader("🎮 Controls")
+st.subheader("🎮 Controls & Help")
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -273,6 +336,30 @@ with col3:
         st.success("🔄 Everything reset!")
         st.rerun()
 
+# Browser-specific help
+with st.expander("🔧 Browser-Specific Camera Help"):
+    st.markdown("""
+    ### 🌐 Microsoft Edge
+    1. **Look for camera icon** 🎥 in address bar
+    2. **Click it** → Select **"Allow"**
+    3. **Refresh page** (F5)
+    4. If no icon appears: **Settings** → **Cookies and site permissions** → **Camera** → Add this site to **Allow**
+    
+    ### 🌐 Google Chrome  
+    1. **Click camera icon** 🎥 in address bar → **Allow**
+    2. Or go to **Settings** → **Privacy and security** → **Site Settings** → **Camera** → **Allow**
+    
+    ### 🌐 Firefox
+    1. **Click shield icon** 🛡️ → **Turn off Tracking Protection** for this site
+    2. **Allow camera** when prompted
+    
+    ### 🖥️ Windows System Settings
+    1. **Settings** → **Privacy & Security** → **Camera**
+    2. Turn ON **"Camera access"**
+    3. Turn ON **"Let apps access your camera"**
+    4. Turn ON **"Let desktop apps access your camera"**
+    """)
+
 # Information section
 with st.expander("📖 How This App Works"):
     st.markdown("""
@@ -282,7 +369,7 @@ with st.expander("📖 How This App Works"):
     - **Real-time Processing**: Analyzes your camera feed live
     - **No Complex Dependencies**: Uses only standard Python libraries
     
-    ### ✅ Why This Version Works
+    ### ✅ Technical Details
     - **No TensorFlow** - Avoids Python version conflicts
     - **No FER library** - Eliminates dependency issues  
     - **Uses OpenCV only** - Pre-installed on Streamlit Cloud
@@ -294,13 +381,6 @@ with st.expander("📖 How This App Works"):
     - Live statistics and counters
     - Adjustable detection sensitivity
     - Works on any device with a camera
-    
-    ### 🔧 Usage Tips
-    1. Click **Start Camera** and allow browser camera access
-    2. Position your face clearly in the camera view
-    3. Watch as faces are detected with emotion labels
-    4. Try adjusting **Detection Sensitivity** for performance
-    5. Use **Reset** to clear all counters
     
     ### 📊 Note About Emotions
     The emotions shown are **simulated for demonstration purposes**. 
